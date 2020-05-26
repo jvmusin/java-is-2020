@@ -5,6 +5,7 @@ import java.util.function.BinaryOperator;
 import java.util.function.Function;
 
 import static java.util.Comparator.comparing;
+import static java.util.Comparator.comparingInt;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 
@@ -61,9 +62,9 @@ public class StudentQueryImpl implements StudentQuery {
 
     @Override
     public String getMinStudentFirstName(List<Student> students) {
-        return map(sorted(students, Student::getId), Student::getFirstName)
-                .stream()
-                .findFirst()
+        return students.stream()
+                .min(comparingInt(Student::getId))
+                .map(Student::getFirstName)
                 .orElse("");
     }
 

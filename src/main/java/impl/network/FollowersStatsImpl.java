@@ -41,7 +41,7 @@ public class FollowersStatsImpl implements FollowersStats {
             this.startUserId = startUserId;
             this.depth = depth;
             this.predicate = predicate;
-            this.totalGoodUsers = new AtomicInteger(0);
+            this.totalGoodUsers = new AtomicInteger();
             this.usedUsers = new ConcurrentSkipListSet<>();
         }
 
@@ -74,14 +74,13 @@ public class FollowersStatsImpl implements FollowersStats {
         }
 
         CompletableFuture<Collection<Integer>> processUser(int userId, boolean takeNeighbours) {
-            if (usedUsers.add(userId)) {
-                CompletableFuture<Void> f = network.getUserInfo(userId).thenAccept(this::tryUpdateResult);
-                CompletableFuture<Collection<Integer>> followers = takeNeighbours
-                        ? network.getFollowers(userId)
-                        : completedFuture(emptyList());
-                return f.thenCompose(v -> followers);
-            }
-            return completedFuture(emptyList());
+            if (!usedUsers.add(userId)) return completedFuture(emptyList());
+
+            CompletableFuture<Void> f = network.getUserInfo(userId).thenAccept(this::tryUpdateResult);
+            CompletableFuture<Collection<Integer>> followers = takeNeighbours
+                    ? network.getFollowers(userId)
+                    : completedFuture(emptyList());
+            return f.thenCompose(v -> followers);
         }
     }
 }

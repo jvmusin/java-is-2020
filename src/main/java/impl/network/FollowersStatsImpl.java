@@ -76,12 +76,10 @@ public class FollowersStatsImpl implements FollowersStats {
         CompletableFuture<Collection<Integer>> processUser(int userId, boolean takeNeighbours) {
             if (usedUsers.add(userId)) {
                 CompletableFuture<Void> f = network.getUserInfo(userId).thenAccept(this::tryUpdateResult);
-                if (takeNeighbours) {
-                    CompletableFuture<Collection<Integer>> followers = network.getFollowers(userId);
-                    return f.thenCompose(v -> followers);
-                } else {
-                    return f.thenApply(v -> emptyList());
-                }
+                CompletableFuture<Collection<Integer>> followers = takeNeighbours
+                        ? network.getFollowers(userId)
+                        : completedFuture(emptyList());
+                return f.thenCompose(v -> followers);
             }
             return completedFuture(emptyList());
         }

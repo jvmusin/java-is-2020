@@ -31,14 +31,14 @@ public class FollowersStatsImpl implements FollowersStats {
     }
 
     private class FindFollowersTask {
-        final int root;
+        final int startUserId;
         final int depth;
         final Predicate<UserInfo> predicate;
         final AtomicInteger totalGoodUsers;
         final Set<Integer> usedUsers;
 
-        FindFollowersTask(int root, int depth, Predicate<UserInfo> predicate) {
-            this.root = root;
+        FindFollowersTask(int startUserId, int depth, Predicate<UserInfo> predicate) {
+            this.startUserId = startUserId;
             this.depth = depth;
             this.predicate = predicate;
             this.totalGoodUsers = new AtomicInteger(0);
@@ -49,29 +49,35 @@ public class FollowersStatsImpl implements FollowersStats {
             if (predicate.test(info)) totalGoodUsers.incrementAndGet();
         }
 
-        Collection<Integer> merge(Collection<Integer> a, Collection<Integer> b) {
+        Collection<Integer> mergeCollections(Collection<Integer> a, Collection<Integer> b) {
             a.addAll(b);
             return a;
         }
 
+        CompletableFuture<Collection<Integer>> mergeResults(
+                CompletableFuture<Collection<Integer>> a,
+                CompletableFuture<Collection<Integer>> b) {
+            return a.thenCombine(b, this::mergeCollections);
+        }
+
         Future<Integer> run() {
-            return run(singleton(root), depth);
+            return run(singleton(startUserId), depth);
         }
 
-        CompletableFuture<Integer> run(Collection<Integer> roots, int depthLeft) {
-            if (roots.isEmpty()) return completedFuture(totalGoodUsers.get());
+        CompletableFuture<Integer> run(Collection<Integer> users, int depthLeft) {
+            if (users.isEmpty()) return completedFuture(totalGoodUsers.get());
 
-            return roots.stream()
-                    .map(r -> processUser(r, depthLeft > 0))
-                    .reduce(completedFuture(new ArrayList<>()), (a, b) -> a.thenCombine(b, this::merge))
-                    .thenCompose(newRoots -> run(newRoots, depthLeft - 1));
+            return users.stream()
+                    .map(userId -> processUser(userId, depthLeft > 0))
+                    .reduce(completedFuture(new ArrayList<>()), this::mergeResults)
+                    .thenCompose(newUsers -> run(newUsers, depthLeft - 1));
         }
 
-        CompletableFuture<Collection<Integer>> processUser(int rootVertex, boolean takeNeighbours) {
-            if (usedUsers.add(rootVertex)) {
-                CompletableFuture<Void> f = network.getUserInfo(rootVertex).thenAccept(this::tryUpdateResult);
+        CompletableFuture<Collection<Integer>> processUser(int userId, boolean takeNeighbours) {
+            if (usedUsers.add(userId)) {
+                CompletableFuture<Void> f = network.getUserInfo(userId).thenAccept(this::tryUpdateResult);
                 if (takeNeighbours) {
-                    CompletableFuture<Collection<Integer>> followers = network.getFollowers(rootVertex);
+                    CompletableFuture<Collection<Integer>> followers = network.getFollowers(userId);
                     return f.thenCompose(Void -> followers);
                 } else {
                     return f.thenApply(Void -> emptyList());

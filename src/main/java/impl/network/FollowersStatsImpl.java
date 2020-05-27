@@ -6,17 +6,16 @@ import api.network.UserInfo;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static java.util.Collections.singleton;
+import static java.util.concurrent.CompletableFuture.completedFuture;
 
 public class FollowersStatsImpl implements FollowersStats {
 
@@ -42,7 +41,7 @@ public class FollowersStatsImpl implements FollowersStats {
             this.root = root;
             this.depth = depth;
             this.predicate = predicate;
-            this.totalGoodUsers = new AtomicInteger();
+            this.totalGoodUsers = new AtomicInteger(0);
             this.usedUsers = new ConcurrentSkipListSet<>();
         }
 
@@ -50,29 +49,27 @@ public class FollowersStatsImpl implements FollowersStats {
             if (predicate.test(info)) totalGoodUsers.incrementAndGet();
         }
 
-        Future<Integer> run() {
-            return ForkJoinPool.commonPool().submit(() -> {
-                totalGoodUsers.set(0);
-                List<Integer> verticesToVisit = new ArrayList<>();
-                verticesToVisit.add(root);
-                for (int d = 0; d <= depth; d++) {
-                    boolean takeNeighbours = d < depth;
-                    List<Integer> nextVertices = ForkJoinPool.commonPool().submit(() -> verticesToVisit.stream().parallel()
-                            .map(v -> processUser(v, takeNeighbours))
-                            .map(CompletableFuture::join)
-                            .flatMap(Collection::stream)
-                            .collect(Collectors.toList())
-                    ).join();
-                    verticesToVisit.clear();
-                    verticesToVisit.addAll(nextVertices);
-                }
-                return totalGoodUsers.get();
-            });
+        Collection<Integer> merge(Collection<Integer> a, Collection<Integer> b) {
+            a.addAll(b);
+            return a;
         }
 
-        private CompletableFuture<Collection<Integer>> processUser(int rootVertex, boolean takeNeighbours) {
+        Future<Integer> run() {
+            return run(singleton(root), depth);
+        }
+
+        CompletableFuture<Integer> run(Collection<Integer> roots, int depthLeft) {
+            if (roots.isEmpty()) return completedFuture(totalGoodUsers.get());
+
+            return roots.stream()
+                    .map(r -> processUser(r, depthLeft > 0))
+                    .reduce(completedFuture(new ArrayList<>()), (a, b) -> a.thenCombine(b, this::merge))
+                    .thenCompose(newRoots -> run(newRoots, depthLeft - 1));
+        }
+
+        CompletableFuture<Collection<Integer>> processUser(int rootVertex, boolean takeNeighbours) {
             if (usedUsers.add(rootVertex)) {
-                CompletableFuture<Void> f = network.getUserInfo(rootVertex).thenAccept(FindFollowersTask.this::tryUpdateResult);
+                CompletableFuture<Void> f = network.getUserInfo(rootVertex).thenAccept(this::tryUpdateResult);
                 if (takeNeighbours) {
                     CompletableFuture<Collection<Integer>> followers = network.getFollowers(rootVertex);
                     return f.thenCompose(Void -> followers);
@@ -80,7 +77,7 @@ public class FollowersStatsImpl implements FollowersStats {
                     return f.thenApply(Void -> emptyList());
                 }
             }
-            return CompletableFuture.completedFuture(emptyList());
+            return completedFuture(emptyList());
         }
     }
 }

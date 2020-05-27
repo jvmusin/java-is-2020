@@ -119,4 +119,27 @@ internal class FollowersStatsTest {
             oneThreadTime.toDouble() / twoThreadTime > 1.3
         )
     }
+
+    @Test
+    fun `test shortest path finds correctly`() {
+        val graph2 = mapOf(
+            1 to listOf(2, 5),
+            2 to listOf(3),
+            3 to listOf(4),
+            4 to listOf(6),
+            5 to listOf(4),
+            6 to listOf()
+        )
+        val info2 = info.filter { it.key <= 6 }
+
+        for (i in 1..20) {
+            val network = SocialNetworkImpl(cores, graph2, info2)
+            val followersStats = FollowersStatsFactory.getInstance(network)
+            val result = followersStats.followersCountBy(1, 3) {
+                true
+            }.get()
+            System.err.println(i)
+            assertEquals(6, result)
+        }
+    }
 }

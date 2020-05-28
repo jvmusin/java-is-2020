@@ -4,8 +4,8 @@ import api.network.FollowersStats;
 import api.network.SocialNetwork;
 import api.network.UserInfo;
 
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -15,7 +15,9 @@ import java.util.function.Predicate;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singleton;
+import static java.util.concurrent.CompletableFuture.allOf;
 import static java.util.concurrent.CompletableFuture.completedFuture;
+import static java.util.stream.Collectors.toList;
 
 public class FollowersStatsImpl implements FollowersStats {
 
@@ -49,17 +51,6 @@ public class FollowersStatsImpl implements FollowersStats {
             if (predicate.test(info)) totalGoodUsers.incrementAndGet();
         }
 
-        Collection<Integer> mergeCollections(Collection<Integer> a, Collection<Integer> b) {
-            a.addAll(b);
-            return a;
-        }
-
-        CompletableFuture<Collection<Integer>> mergeResults(
-                CompletableFuture<Collection<Integer>> a,
-                CompletableFuture<Collection<Integer>> b) {
-            return a.thenCombine(b, this::mergeCollections);
-        }
-
         Future<Integer> run() {
             return run(singleton(startUserId), depth);
         }
@@ -67,9 +58,14 @@ public class FollowersStatsImpl implements FollowersStats {
         CompletableFuture<Integer> run(Collection<Integer> users, int depthLeft) {
             if (users.isEmpty()) return completedFuture(totalGoodUsers.get());
 
-            return users.stream()
+            List<CompletableFuture<Collection<Integer>>> tasks = users.stream()
                     .map(userId -> processUser(userId, depthLeft > 0))
-                    .reduce(completedFuture(new ArrayList<>()), this::mergeResults)
+                    .collect(toList());
+            return allOf(tasks.toArray(CompletableFuture[]::new))
+                    .thenApply(v -> tasks.stream()
+                            .map(CompletableFuture::join)
+                            .flatMap(Collection::stream)
+                            .collect(toList()))
                     .thenCompose(newUsers -> run(newUsers, depthLeft - 1));
         }
 
